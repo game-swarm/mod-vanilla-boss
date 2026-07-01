@@ -1,30 +1,7 @@
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-
-pub type PlayerId = u32;
-
-#[derive(Component, Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
-pub struct RoomId(pub u32);
-
-#[derive(Component, Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct Position {
-    pub x: i32,
-    pub y: i32,
-    pub room: RoomId,
-}
-
-#[derive(Component, Debug, Clone, Serialize, Deserialize)]
-pub struct Drone {
-    pub owner: PlayerId,
-    pub hits: u32,
-    pub hits_max: u32,
-}
-
-#[derive(Component, Debug, Clone, Serialize, Deserialize)]
-pub struct Resource {
-    pub amounts: BTreeMap<String, u32>,
-}
+use swarm_engine::components::{BodyPart, BodyPartRegistry, Drone, Position, Resource, RoomId};
 
 #[derive(Resource, Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Tick(pub u64);
@@ -106,8 +83,15 @@ impl Default for VanillaBossPlugin {
                     mode: BossMode::World,
                     hits: 100_000,
                     phases: vec![75, 50, 25],
-                    drops: BTreeMap::from([("Energy".to_string(), 5_000), ("Mineral".to_string(), 100)]),
-                    spawn_position: Position { x: 25, y: 25, room: RoomId(0) },
+                    drops: BTreeMap::from([
+                        ("Energy".to_string(), 5_000),
+                        ("Mineral".to_string(), 100),
+                    ]),
+                    spawn_position: Position {
+                        x: 25,
+                        y: 25,
+                        room: RoomId(0),
+                    },
                 },
                 BossTemplate {
                     name: "arena-champion".to_string(),
@@ -115,7 +99,11 @@ impl Default for VanillaBossPlugin {
                     hits: 50_000,
                     phases: vec![50, 20],
                     drops: BTreeMap::from([("ArenaToken".to_string(), 1)]),
-                    spawn_position: Position { x: 25, y: 25, room: RoomId(1) },
+                    spawn_position: Position {
+                        x: 25,
+                        y: 25,
+                        room: RoomId(1),
+                    },
                 },
             ],
             arena_bosses_enabled: true,
@@ -137,7 +125,13 @@ impl Plugin for VanillaBossPlugin {
         .init_resource::<Tick>()
         .add_systems(
             Update,
-            (boss_spawn_system, boss_phase_trigger_system, boss_ai_system, boss_drop_system).chain(),
+            (
+                boss_spawn_system,
+                boss_phase_trigger_system,
+                boss_ai_system,
+                boss_drop_system,
+            )
+                .chain(),
         );
     }
 }
@@ -149,7 +143,10 @@ pub fn boss_spawn_system(
     world: Res<WorldConfig>,
     bosses: Query<&BossAI>,
 ) {
-    let interval = world.boss_spawn_interval.max(config.boss_spawn_interval).max(1);
+    let interval = world
+        .boss_spawn_interval
+        .max(config.boss_spawn_interval)
+        .max(1);
     if tick.0 % interval != 0 {
         return;
     }
@@ -162,11 +159,7 @@ pub fn boss_spawn_system(
             continue;
         }
         commands.spawn((
-            Drone {
-                owner: 0,
-                hits: template.hits,
-                hits_max: template.hits,
-            },
+            boss_drone(template.hits),
             template.spawn_position,
             BossAI {
                 name: template.name.clone(),
@@ -217,8 +210,21 @@ pub fn boss_drop_system(
 ) {
     for (entity, boss, drone, position) in &bosses {
         if drone.hits == 0 {
-            commands.spawn((Resource { amounts: boss.drops.clone() }, *position));
+            commands.spawn((
+                Resource {
+                    amounts: boss.drops.clone().into_iter().collect(),
+                },
+                *position,
+            ));
             commands.entity(entity).despawn();
         }
     }
+}
+
+fn boss_drone(hits: u32) -> Drone {
+    let registry = BodyPartRegistry::default();
+    let mut drone = Drone::new(0, vec![BodyPart::Tough, BodyPart::Attack], &registry);
+    drone.hits = hits;
+    drone.hits_max = hits;
+    drone
 }

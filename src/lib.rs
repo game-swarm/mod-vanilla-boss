@@ -147,7 +147,7 @@ pub fn boss_spawn_system(
         .boss_spawn_interval
         .max(config.boss_spawn_interval)
         .max(1);
-    if tick.0 % interval != 0 {
+    if !tick.0.is_multiple_of(interval) {
         return;
     }
     for template in &config.boss_templates {
@@ -227,4 +227,38 @@ fn boss_drone(hits: u32) -> Drone {
     drone.hits = hits;
     drone.hits_max = hits;
     drone
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_plugin_defines_world_and_arena_bosses() {
+        let plugin = VanillaBossPlugin::default();
+
+        assert!(plugin.world_bosses_enabled);
+        assert!(plugin.arena_bosses_enabled);
+        assert_eq!(plugin.boss_templates.len(), 2);
+        assert!(
+            plugin
+                .boss_templates
+                .iter()
+                .any(|boss| boss.mode == BossMode::World)
+        );
+        assert!(
+            plugin
+                .boss_templates
+                .iter()
+                .any(|boss| boss.mode == BossMode::Arena)
+        );
+    }
+
+    #[test]
+    fn boss_drone_uses_requested_hit_points() {
+        let drone = boss_drone(123);
+
+        assert_eq!(drone.hits, 123);
+        assert_eq!(drone.hits_max, 123);
+    }
 }

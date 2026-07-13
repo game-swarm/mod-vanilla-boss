@@ -31,3 +31,12 @@ boss_spawn_interval = 5000
 
 - 读取: `WorldConfig`, `Tick`
 - 写入: `Drone`（Boss 实体）, `BossAI`（阶段状态机）, `Resource`（掉落物）
+
+## Standalone Development
+
+This repository is consumable as an independent Cargo crate. It pins `swarm-engine` from `https://github.com/game-swarm/engine.git` at rev `4f9776302d0784e78bc5f04c7e38e28cc6d4c633`; no sibling checkout layout is required.
+
+```sh
+cargo check
+cargo test
+```

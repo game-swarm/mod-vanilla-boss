@@ -9,9 +9,13 @@ pve-spawning = ">=0.1.0"
 combat-core = ">=0.1.0"
 
 [config]
-boss_templates = { type = "string", default = "", description = "JSON boss template definitions" }
 arena_bosses_enabled = { type = "bool", default = true, description = "Enable arena boss encounters" }
-world_bosses_enabled = { type = "bool", default = false, description = "Enable world boss encounters" }
+world_bosses_enabled = { type = "bool", default = true, description = "Enable world boss encounters" }
+boss_spawn_interval = { type = "u64", default = 5000, description = "Boss spawn interval in ticks" }
+boss_templates = { type = "array<BossTemplate>", default = [
+  { name = "world-alpha", mode = "world", hits = 100000, phases = [75, 50, 25], drops = { Energy = 5000, Mineral = 100 }, spawn_position = { x = 25, y = 25, room = 0 } },
+  { name = "arena-champion", mode = "arena", hits = 50000, phases = [50, 20], drops = { ArenaToken = 1 }, spawn_position = { x = 25, y = 25, room = 1 } },
+], description = "Typed boss template definitions" }
 
 [compatibility]
 engine_abi_min = "1.0"

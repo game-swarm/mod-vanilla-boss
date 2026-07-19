@@ -42,9 +42,16 @@ config = { world_bosses_enabled = true, arena_bosses_enabled = true, boss_spawn_
 
 ## Standalone Development
 
-This repository is consumable as an independent Cargo crate. Its `swarm-engine` dependency is pinned in `Cargo.toml`, so no sibling checkout layout is required.
+This crate depends on `swarm-engine-api` and `swarm-engine-plugin-sdk` version `0.1.0`. Until those crates are published to a registry, place the API repository beside `mods/` so the paths in `Cargo.toml` resolve:
 
 ```sh
+mkdir -p swarm/mods
+git clone <this-mod-repository-url> swarm/mods/vanilla-boss
+# Fetch the reviewed API/SDK v0.1.0 source:
+git clone --branch v0.1.0 https://github.com/game-swarm/engine-api swarm/engine-api
+cd swarm/mods/vanilla-boss
 cargo check
 cargo test
 ```
+
+To adopt a later API/SDK release, update both exact versions in `Cargo.toml` and the immutable API commit in `.github/workflows/ci.yml` together.

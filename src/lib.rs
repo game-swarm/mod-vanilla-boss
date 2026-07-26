@@ -6,8 +6,11 @@ use swarm_engine_api::prelude::{
     DESCRIPTOR_SCHEMA_VERSION, PluginDependency, PluginDescriptor, RoomId, SystemDescriptor,
     TickPhase,
 };
-use swarm_engine_plugin_sdk::components::{BodyPartRegistry, Drone, Position, Resource};
-use swarm_engine_plugin_sdk::traits::SwarmPlugin;
+use swarm_engine_plugin_sdk::{
+    components::{BodyPartRegistry, Drone, Position, Resource},
+    native::{NativeModRegisterContext, NativeModRegisterError, NativeModRegisterFn},
+    traits::SwarmPlugin,
+};
 
 #[derive(Resource, Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Tick(pub u64);
@@ -79,6 +82,94 @@ pub struct VanillaBossPlugin {
     pub world_bosses_enabled: bool,
     pub boss_spawn_interval: u64,
 }
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct NativeVanillaBossConfig {
+    arena_bosses_enabled: bool,
+    world_bosses_enabled: bool,
+    boss_spawn_interval: u64,
+    boss_templates: Vec<NativeBossTemplate>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct NativeBossTemplate {
+    name: String,
+    mode: NativeBossMode,
+    hits: u32,
+    phases: Vec<u32>,
+    drops: BTreeMap<String, u32>,
+    spawn_position: Position,
+}
+
+impl From<NativeBossTemplate> for BossTemplate {
+    fn from(template: NativeBossTemplate) -> Self {
+        Self {
+            name: template.name,
+            mode: template.mode.into(),
+            hits: template.hits,
+            phases: template.phases,
+            drops: template.drops,
+            spawn_position: template.spawn_position,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum NativeBossMode {
+    World,
+    Arena,
+}
+
+impl From<NativeBossMode> for BossMode {
+    fn from(mode: NativeBossMode) -> Self {
+        match mode {
+            NativeBossMode::World => Self::World,
+            NativeBossMode::Arena => Self::Arena,
+        }
+    }
+}
+
+struct ConfiguredVanillaBossPlugin {
+    plugin: VanillaBossPlugin,
+    world_config: WorldConfig,
+}
+
+impl Plugin for ConfiguredVanillaBossPlugin {
+    fn build(&self, app: &mut App) {
+        app.insert_resource(self.world_config.clone());
+        self.plugin.build(app);
+    }
+}
+
+impl SwarmPlugin for ConfiguredVanillaBossPlugin {
+    fn descriptor() -> PluginDescriptor {
+        VanillaBossPlugin::descriptor()
+    }
+}
+
+pub fn register(context: &mut NativeModRegisterContext<'_>) -> Result<(), NativeModRegisterError> {
+    let config = context.decode_config::<NativeVanillaBossConfig>()?;
+    let world_config = WorldConfig {
+        world_bosses_enabled: config.world_bosses_enabled,
+        arena_bosses_enabled: config.arena_bosses_enabled,
+        boss_spawn_interval: config.boss_spawn_interval,
+    };
+    let plugin = VanillaBossPlugin {
+        boss_templates: config.boss_templates.into_iter().map(Into::into).collect(),
+        arena_bosses_enabled: config.arena_bosses_enabled,
+        world_bosses_enabled: config.world_bosses_enabled,
+        boss_spawn_interval: config.boss_spawn_interval,
+    };
+    context.install(ConfiguredVanillaBossPlugin {
+        plugin,
+        world_config,
+    })
+}
+
+const _: NativeModRegisterFn = register;
 
 impl Default for VanillaBossPlugin {
     fn default() -> Self {
@@ -348,6 +439,55 @@ fn boss_drone(hits: u32) -> Drone {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use swarm_engine_api::world::WorldMode;
+    use swarm_engine_plugin_sdk::native::{
+        NativeModConfig, NativeModInstallExpectation, NativeModRegisterContext,
+    };
+
+    #[test]
+    fn native_entry_constructs_configured_plugin_and_mod_local_resources() {
+        let mut app = App::new();
+        let mut context = NativeModRegisterContext::new(
+            &mut app,
+            "vanilla-boss",
+            WorldMode::Arena,
+            NativeModConfig::from_defaults(serde_json::json!({
+                "arena_bosses_enabled": false,
+                "world_bosses_enabled": true,
+                "boss_spawn_interval": 777,
+                "boss_templates": [{
+                    "name": "configured-champion",
+                    "mode": "arena",
+                    "hits": 12_345,
+                    "phases": [60, 30],
+                    "drops": { "ArenaToken": 4 },
+                    "spawn_position": { "x": 8, "y": 9, "room": 3 }
+                }]
+            })),
+            NativeModInstallExpectation::enabled("0.1.0"),
+        );
+
+        register(&mut context).unwrap();
+
+        let config = app.world().resource::<VanillaBossConfig>();
+        assert!(config.world_bosses_enabled);
+        assert!(!config.arena_bosses_enabled);
+        assert_eq!(config.boss_spawn_interval, 777);
+        assert_eq!(config.boss_templates.len(), 1);
+        let template = &config.boss_templates[0];
+        assert_eq!(template.name, "configured-champion");
+        assert_eq!(template.mode, BossMode::Arena);
+        assert_eq!(template.hits, 12_345);
+        assert_eq!(template.phases, [60, 30]);
+        assert_eq!(template.drops.get("ArenaToken"), Some(&4));
+        assert_eq!(template.spawn_position.room, RoomId(3));
+
+        let world = app.world().resource::<WorldConfig>();
+        assert!(world.world_bosses_enabled);
+        assert!(!world.arena_bosses_enabled);
+        assert_eq!(world.boss_spawn_interval, 777);
+        assert_eq!(app.world().resource::<Tick>().0, 0);
+    }
 
     #[test]
     fn default_plugin_defines_world_and_arena_bosses() {

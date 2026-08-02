@@ -387,12 +387,17 @@ pub fn boss_phase_trigger_system(mut bosses: Query<(&mut BossAI, &Drone)>) {
         } else {
             (drone.hits as u64 * 100 / drone.hits_max as u64) as u32
         };
-        boss.phase = if pct <= *boss.phase_thresholds.get(2).unwrap_or(&25) {
-            BossPhase::Phase3
-        } else if pct <= *boss.phase_thresholds.get(1).unwrap_or(&50) {
-            BossPhase::Phase2
-        } else {
-            BossPhase::Phase1
+        let thresholds = match boss.phase_thresholds.as_slice() {
+            [phase2, phase3] if phase2 > phase3 && *phase2 <= 100 => Some((*phase2, *phase3)),
+            [phase1, phase2, phase3] if phase1 > phase2 && phase2 > phase3 && *phase1 <= 100 => {
+                Some((*phase2, *phase3))
+            }
+            _ => None,
+        };
+        boss.phase = match thresholds {
+            Some((_, phase3)) if pct <= phase3 => BossPhase::Phase3,
+            Some((phase2, _)) if pct <= phase2 => BossPhase::Phase2,
+            Some(_) | None => BossPhase::Phase1,
         };
     }
 }
@@ -443,6 +448,62 @@ mod tests {
     use swarm_engine_plugin_sdk::native::{
         NativeModConfig, NativeModInstallExpectation, NativeModRegisterContext,
     };
+
+    fn phase_after_update(phase_thresholds: Vec<u32>, hits: u32) -> BossPhase {
+        let mut app = App::new();
+        app.add_systems(Update, boss_phase_trigger_system);
+        let mut drone = boss_drone(100);
+        drone.hits = hits;
+        let entity = app
+            .world_mut()
+            .spawn((
+                BossAI {
+                    name: "test-boss".to_string(),
+                    mode: BossMode::Arena,
+                    phase: BossPhase::Phase1,
+                    phase_thresholds,
+                    drops: BTreeMap::new(),
+                    spawn_position: Position {
+                        x: 0,
+                        y: 0,
+                        room: RoomId(0),
+                    },
+                },
+                drone,
+            ))
+            .id();
+
+        app.update();
+
+        app.world().entity(entity).get::<BossAI>().unwrap().phase
+    }
+
+    #[test]
+    fn boss_enters_phase2_below_first_of_two_descending_thresholds() {
+        let phase = phase_after_update(vec![50, 20], 49);
+
+        assert_eq!(phase, BossPhase::Phase2);
+    }
+
+    #[test]
+    fn boss_enters_phase3_below_second_of_two_descending_thresholds() {
+        let phase = phase_after_update(vec![50, 20], 19);
+
+        assert_eq!(phase, BossPhase::Phase3);
+    }
+
+    #[test]
+    fn three_threshold_defaults_keep_50_and_25_percent_transitions() {
+        assert_eq!(phase_after_update(vec![75, 50, 25], 50), BossPhase::Phase2);
+        assert_eq!(phase_after_update(vec![75, 50, 25], 25), BossPhase::Phase3);
+    }
+
+    #[test]
+    fn malformed_or_short_thresholds_leave_boss_in_phase1() {
+        assert_eq!(phase_after_update(vec![20, 50], 10), BossPhase::Phase1);
+        assert_eq!(phase_after_update(vec![50], 10), BossPhase::Phase1);
+        assert_eq!(phase_after_update(Vec::new(), 10), BossPhase::Phase1);
+    }
 
     #[test]
     fn native_entry_constructs_configured_plugin_and_mod_local_resources() {
